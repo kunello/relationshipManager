@@ -1,0 +1,23 @@
+{
+  "name": "relationship-manager",
+  "version": "1.0.0",
+  "description": "Lightweight personal CRM — track people and interactions via CLI + Claude Code",
+  "type": "module",
+  "scripts": {
+    "add-contact": "tsx src/addContact.ts",
+    "add-interaction": "tsx src/addInteraction.ts",
+    "search": "tsx src/searchContacts.ts",
+    "view": "tsx src/viewContact.ts",
+    "import": "tsx scripts/bulkImport.ts",
+    "import:confirm": "tsx scripts/bulkImport.ts --confirm"
+  },
+  "dependencies": {
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "@types/uuid": "^10.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
