@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "id": "c_7a3b8e1f4d2c",
+    "name": "Campbell Cooke",
+    "nickname": null,
+    "company": null,
+    "role": null,
+    "howWeMet": null,
+    "tags": [],
+    "contactInfo": {
+      "email": null,
+      "phone": null,
+      "linkedin": null
+    },
+    "createdAt": "2026-02-17T00:00:00.000Z",
+    "updatedAt": "2026-02-17T00:00:00.000Z"
+  }
+]
