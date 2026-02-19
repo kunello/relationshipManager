@@ -5,3 +5,10 @@ dist/
 # Raw import files (personal data)
 import/*
 !import/.gitkeep
+
+# Environment secrets
+.env
+.firebase-service-account.json
+
+# Data files
+data/*

@@ -1,0 +1,110 @@
+import { ProxyOAuthServerProvider } from '@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js';
+import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import { OAuth2Client } from 'google-auth-library';
+
+const ALLOWED_EMAIL = process.env.ALLOWED_EMAIL!;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
+
+const oauth2Client = new OAuth2Client();
+
+// In-memory client store for MCP dynamic client registration.
+// Claude.ai registers itself as an OAuth client via RFC 7591.
+// We store the registration and map it to our Google OAuth client ID
+// when proxying to Google's endpoints.
+const registeredClients = new Map<string, OAuthClientInformationFull>();
+
+export const oauthProvider = new ProxyOAuthServerProvider({
+  endpoints: {
+    authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    revocationUrl: 'https://oauth2.googleapis.com/revoke',
+  },
+
+  verifyAccessToken: async (token: string): Promise<AuthInfo> => {
+    console.log('verifyAccessToken called, token length:', token.length);
+
+    // Google access tokens can be verified via the userinfo endpoint
+    const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    console.log('Google userinfo response status:', response.status);
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.error('Google userinfo error:', body);
+      throw new Error('Invalid or expired token');
+    }
+
+    const userinfo = await response.json() as { email?: string; sub?: string };
+    console.log('Google userinfo email:', userinfo.email);
+
+    if (!userinfo.email || userinfo.email.toLowerCase() !== ALLOWED_EMAIL.toLowerCase()) {
+      console.error('Email mismatch:', userinfo.email, 'vs', ALLOWED_EMAIL);
+      throw new Error('Forbidden: unauthorized email');
+    }
+
+    return {
+      token,
+      clientId: GOOGLE_CLIENT_ID,
+      scopes: ['openid', 'email', 'profile'],
+      // Google access tokens last 1 hour — set expiry so the SDK doesn't reject it
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      extra: { email: userinfo.email },
+    };
+  },
+
+  getClient: async (clientId: string): Promise<OAuthClientInformationFull | undefined> => {
+    // Return registered client if we have it, mapping to our Google client credentials
+    const registered = registeredClients.get(clientId);
+    if (registered) {
+      return {
+        ...registered,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+      };
+    }
+
+    // If Claude.ai sends our Google Client ID directly
+    if (clientId === GOOGLE_CLIENT_ID) {
+      return {
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        // The SDK's authorize handler compares redirect_uri strings with Array.includes(),
+        // so these must be plain strings despite the type expecting URL objects.
+        redirect_uris: [
+          'https://claude.ai/api/mcp/auth_callback',
+        ] as any,
+      } as unknown as OAuthClientInformationFull;
+    }
+
+    return undefined;
+  },
+});
+
+// Override the clients store to support dynamic client registration
+const originalClientsStore = oauthProvider.clientsStore;
+(oauthProvider as any).__clientsStore = {
+  getClient: originalClientsStore.getClient,
+  registerClient: async (clientMetadata: any): Promise<OAuthClientInformationFull> => {
+    // Claude.ai dynamically registers — we accept it and assign our Google client ID
+    const clientId = `mcp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const registered: OAuthClientInformationFull = {
+      ...clientMetadata,
+      client_id: clientId,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+    };
+    registeredClients.set(clientId, registered);
+    return registered;
+  },
+};
+
+// Patch clientsStore getter
+Object.defineProperty(oauthProvider, 'clientsStore', {
+  get() {
+    return (this as any).__clientsStore;
+  },
+});
