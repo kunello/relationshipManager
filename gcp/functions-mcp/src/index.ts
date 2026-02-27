@@ -101,6 +101,7 @@ app.use(mcpAuthRouter({
   provider: oauthProvider,
   issuerUrl: serverUrl,
   baseUrl: serverUrl,
+  resourceServerUrl: mcpServerUrl,
   scopesSupported: ['openid', 'email', 'profile'],
   resourceName: 'Personal CRM',
 }));
