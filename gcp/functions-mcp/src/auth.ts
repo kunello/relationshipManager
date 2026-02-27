@@ -1,13 +1,10 @@
 import { ProxyOAuthServerProvider } from '@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js';
 import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
-import { OAuth2Client } from 'google-auth-library';
 
 const ALLOWED_EMAIL = process.env.ALLOWED_EMAIL!;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
-
-const oauth2Client = new OAuth2Client();
 
 // In-memory client store for MCP dynamic client registration.
 // Claude.ai registers itself as an OAuth client via RFC 7591.
@@ -83,6 +80,26 @@ export const oauthProvider = new ProxyOAuthServerProvider({
     return undefined;
   },
 });
+
+// Override authorize() to inject Google-specific params for long-lived sessions.
+// The SDK's default authorize() builds the URL from scratch, so we can't just
+// append query params to authorizationUrl — they get overwritten. Instead, we
+// wrap the method to add access_type=offline (requests a refresh token) and
+// prompt=consent (ensures Google always returns one, not just on first auth).
+const originalAuthorize = oauthProvider.authorize.bind(oauthProvider);
+oauthProvider.authorize = async (client, params, res) => {
+  // Intercept the response to inject our extra params before the redirect
+  const interceptedRes = {
+    ...res,
+    redirect: (url: string) => {
+      const parsed = new URL(url);
+      parsed.searchParams.set('access_type', 'offline');
+      parsed.searchParams.set('prompt', 'consent');
+      res.redirect(parsed.toString());
+    },
+  };
+  return originalAuthorize(client, params, interceptedRes as any);
+};
 
 // Override the clients store to support dynamic client registration
 const originalClientsStore = oauthProvider.clientsStore;

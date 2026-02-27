@@ -19,6 +19,7 @@ if (matches.length === 0) {
 }
 
 const allInteractions = readInteractions();
+const contactMap = new Map(contacts.map(c => [c.id, c.name]));
 
 for (const contact of matches) {
   console.log('━'.repeat(50));
@@ -29,6 +30,13 @@ for (const contact of matches) {
   }
   if (contact.howWeMet) console.log(`   How we met: ${contact.howWeMet}`);
   if (contact.tags.length) console.log(`   Tags: ${contact.tags.join(', ')}`);
+  if (contact.expertise.length) console.log(`   Expertise: ${contact.expertise.join(', ')}`);
+  if (contact.notes.length) {
+    console.log(`   Notes:`);
+    for (const note of contact.notes) {
+      console.log(`     • ${note}`);
+    }
+  }
 
   const info = contact.contactInfo;
   if (info.email || info.phone || info.linkedin) {
@@ -42,10 +50,18 @@ for (const contact of matches) {
   if (interactions.length > 0) {
     console.log(`\n   📅 Interactions (${interactions.length}):`);
     for (const i of interactions) {
-      console.log(`\n   [${i.date}] ${i.type}`);
+      const isGroup = i.contactIds.length > 1;
+      const groupLabel = isGroup ? ` [GROUP: ${i.contactIds.length} people]` : '';
+      console.log(`\n   [${i.date}] ${i.type}${i.location ? ` @ ${i.location}` : ''}${groupLabel}`);
       console.log(`   ${i.summary}`);
+      if (isGroup) {
+        const otherNames = i.contactIds
+          .filter(id => id !== contact.id)
+          .map(id => contactMap.get(id) ?? 'Unknown');
+        console.log(`   With: ${otherNames.join(', ')}`);
+      }
       if (i.topics.length) console.log(`   Topics: ${i.topics.join(', ')}`);
-      if (i.followUp) console.log(`   ⏩ Follow-up: ${i.followUp}`);
+      if (i.mentionedNextSteps) console.log(`   ⏩ Next steps: ${i.mentionedNextSteps}`);
     }
   } else {
     console.log('\n   No interactions recorded yet.');

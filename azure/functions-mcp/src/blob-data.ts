@@ -1,5 +1,5 @@
 import { BlobServiceClient } from '@azure/storage-blob';
-import type { Contact, Interaction } from './types.js';
+import type { Contact, Interaction, TagDictionary, ContactSummary } from './types.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING!;
 const containerName = process.env.AZURE_CONTAINER_NAME!;
@@ -49,4 +49,42 @@ export async function readInteractions(): Promise<Interaction[]> {
 
 export async function writeInteractions(interactions: Interaction[]): Promise<void> {
   return writeJson('interactions.json', interactions);
+}
+
+const EMPTY_TAG_DICTIONARY: TagDictionary = {
+  version: 1,
+  contactTags: [],
+  interactionTopics: [],
+  expertiseAreas: [],
+};
+
+export async function readTags(): Promise<TagDictionary> {
+  try {
+    const blobClient = containerClient.getBlobClient('tags.json');
+    const response = await blobClient.download(0);
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of response.readableStreamBody as NodeJS.ReadableStream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const content = Buffer.concat(chunks).toString('utf-8');
+    return JSON.parse(content) as TagDictionary;
+  } catch (err: any) {
+    if (err.statusCode === 404) {
+      return { ...EMPTY_TAG_DICTIONARY };
+    }
+    throw err;
+  }
+}
+
+export async function writeTags(tags: TagDictionary): Promise<void> {
+  return writeJson('tags.json', tags);
+}
+
+export async function readSummaries(): Promise<ContactSummary[]> {
+  return readJson<ContactSummary[]>('contact-summaries.json');
+}
+
+export async function writeSummaries(summaries: ContactSummary[]): Promise<void> {
+  return writeJson('contact-summaries.json', summaries);
 }

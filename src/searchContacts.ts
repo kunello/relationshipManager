@@ -3,12 +3,13 @@ import {
 } from './utils.js';
 
 const args = parseArgs(process.argv.slice(2));
-const query = args['_positional'] ?? args['tag'] ?? args['company'] ?? '';
+const query = args['_positional'] ?? args['tag'] ?? args['company'] ?? args['expertise'] ?? '';
 
 if (!query) {
   console.error('Usage: npx tsx src/searchContacts.ts "search term"');
   console.error('       npx tsx src/searchContacts.ts --tag "golf"');
   console.error('       npx tsx src/searchContacts.ts --company "Acme"');
+  console.error('       npx tsx src/searchContacts.ts --expertise "agtech"');
   process.exit(1);
 }
 
@@ -16,9 +17,10 @@ const contacts = readContacts();
 const interactions = readInteractions();
 const q = query.toLowerCase();
 
-// Search mode: tag-only, company-only, or full-text
+// Search mode: tag-only, company-only, expertise-only, or full-text
 const isTagSearch = !!args['tag'];
 const isCompanySearch = !!args['company'];
+const isExpertiseSearch = !!args['expertise'];
 
 interface SearchResult {
   contactId: string;
@@ -27,6 +29,7 @@ interface SearchResult {
 }
 
 const results = new Map<string, SearchResult>();
+const contactMap = new Map(contacts.map(c => [c.id, c.name]));
 
 function addResult(contactId: string, contactName: string, matchedIn: string) {
   const existing = results.get(contactId);
@@ -52,6 +55,13 @@ for (const c of contacts) {
     continue;
   }
 
+  if (isExpertiseSearch) {
+    if (c.expertise.some(e => e.toLowerCase().includes(q))) {
+      addResult(c.id, c.name, `expertise: ${c.expertise.filter(e => e.toLowerCase().includes(q)).join(', ')}`);
+    }
+    continue;
+  }
+
   // Full-text search across all contact fields
   if (c.name.toLowerCase().includes(q)) addResult(c.id, c.name, 'name');
   if (c.nickname?.toLowerCase().includes(q)) addResult(c.id, c.name, 'nickname');
@@ -61,22 +71,38 @@ for (const c of contacts) {
   if (c.tags.some(t => t.toLowerCase().includes(q))) {
     addResult(c.id, c.name, `tag: ${c.tags.filter(t => t.toLowerCase().includes(q)).join(', ')}`);
   }
+  if (c.expertise.some(e => e.toLowerCase().includes(q))) {
+    addResult(c.id, c.name, `expertise: ${c.expertise.filter(e => e.toLowerCase().includes(q)).join(', ')}`);
+  }
+  if (c.notes.some(n => n.toLowerCase().includes(q))) {
+    addResult(c.id, c.name, `notes: ${c.notes.filter(n => n.toLowerCase().includes(q)).join(', ')}`);
+  }
 }
 
-// Also search interactions (summary, topics, followUp)
-if (!isTagSearch && !isCompanySearch) {
+// Also search interactions (summary, topics, mentionedNextSteps)
+if (!isTagSearch && !isCompanySearch && !isExpertiseSearch) {
   for (const i of interactions) {
-    const contact = contacts.find(c => c.id === i.contactId);
-    const cName = contact?.name ?? 'Unknown';
+    const isGroup = i.contactIds.length > 1;
+    const groupIndicator = isGroup ? ` (group: ${i.contactIds.length} people)` : '';
 
-    if (i.summary.toLowerCase().includes(q)) {
-      addResult(i.contactId, cName, `interaction (${i.date}): "${i.summary.slice(0, 80)}..."`);
-    }
-    if (i.topics.some(t => t.toLowerCase().includes(q))) {
-      addResult(i.contactId, cName, `interaction topic (${i.date}): ${i.topics.filter(t => t.toLowerCase().includes(q)).join(', ')}`);
-    }
-    if (i.followUp?.toLowerCase().includes(q)) {
-      addResult(i.contactId, cName, `follow-up (${i.date}): ${i.followUp}`);
+    if (i.summary.toLowerCase().includes(q) ||
+        i.topics.some(t => t.toLowerCase().includes(q)) ||
+        i.mentionedNextSteps?.toLowerCase().includes(q)) {
+
+      // Add a result entry for each participant
+      for (const cId of i.contactIds) {
+        const cName = contactMap.get(cId) ?? 'Unknown';
+
+        if (i.summary.toLowerCase().includes(q)) {
+          addResult(cId, cName, `interaction (${i.date})${groupIndicator}: "${i.summary.slice(0, 80)}..."`);
+        }
+        if (i.topics.some(t => t.toLowerCase().includes(q))) {
+          addResult(cId, cName, `interaction topic (${i.date})${groupIndicator}: ${i.topics.filter(t => t.toLowerCase().includes(q)).join(', ')}`);
+        }
+        if (i.mentionedNextSteps?.toLowerCase().includes(q)) {
+          addResult(cId, cName, `next steps (${i.date})${groupIndicator}: ${i.mentionedNextSteps}`);
+        }
+      }
     }
   }
 }

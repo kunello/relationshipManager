@@ -1,8 +1,12 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  isInitializeRequest,
+} from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
 import { TOOLS } from './tools.js';
 import { oauthProvider } from './auth.js';
@@ -12,8 +16,13 @@ import {
   addContact,
   updateContact,
   logInteraction,
+  editInteraction,
   getRecentInteractions,
-  getFollowups,
+  getMentionedNextSteps,
+  getTags,
+  manageTags,
+  deleteInteraction,
+  deleteContact,
 } from './handlers.js';
 
 // ── Tool dispatch ────────────────────────────────────────────────────
@@ -23,46 +32,51 @@ const toolHandlers: Record<string, (args: any) => Promise<any>> = {
   add_contact: addContact,
   update_contact: updateContact,
   log_interaction: logInteraction,
+  edit_interaction: editInteraction,
   get_recent_interactions: getRecentInteractions,
-  get_followups: getFollowups,
+  get_mentioned_next_steps: getMentionedNextSteps,
+  get_tags: getTags,
+  manage_tags: manageTags,
+  delete_interaction: deleteInteraction,
+  delete_contact: deleteContact,
 };
 
 // ── Create MCP server instance ───────────────────────────────────────
-function createMcpServer(): McpServer {
-  const server = new McpServer({
-    name: 'personal-crm',
-    version: '1.0.0',
-  });
+function createMcpServer(): Server {
+  const server = new Server(
+    { name: 'personal-crm', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  );
 
-  for (const tool of TOOLS) {
-    const handler = toolHandlers[tool.name];
-    if (!handler) continue;
+  // List tools — return raw JSON Schema definitions directly
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: TOOLS,
+  }));
 
-    const schema: Record<string, any> = {};
-    const props = (tool.inputSchema as any)?.properties ?? {};
-    for (const [key, val] of Object.entries(props)) {
-      schema[key] = val;
+  // Call tool — dispatch to handler functions
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    const handler = toolHandlers[name];
+
+    if (!handler) {
+      return {
+        content: [{ type: 'text' as const, text: `Unknown tool: ${name}` }],
+        isError: true,
+      };
     }
 
-    server.tool(
-      tool.name,
-      tool.description ?? '',
-      schema,
-      async ({ arguments: args }) => {
-        try {
-          const result = await handler(args);
-          return {
-            content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-          };
-        } catch (err: any) {
-          return {
-            content: [{ type: 'text' as const, text: `Error: ${err.message}` }],
-            isError: true,
-          };
-        }
-      },
-    );
-  }
+    try {
+      const result = await handler(args ?? {});
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text' as const, text: `Error: ${err.message}` }],
+        isError: true,
+      };
+    }
+  });
 
   return server;
 }

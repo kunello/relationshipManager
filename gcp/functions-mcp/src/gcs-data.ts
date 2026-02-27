@@ -1,5 +1,5 @@
 import { Storage } from '@google-cloud/storage';
-import type { Contact, Interaction } from './types.js';
+import type { Contact, Interaction, TagDictionary, ContactSummary } from './types.js';
 
 const storage = new Storage();
 const BUCKET = process.env.DATA_BUCKET_NAME!;
@@ -37,4 +37,35 @@ export async function readInteractions(): Promise<Interaction[]> {
 
 export async function writeInteractions(interactions: Interaction[]): Promise<void> {
   return writeJson('interactions.json', interactions);
+}
+
+const EMPTY_TAG_DICTIONARY: TagDictionary = {
+  version: 1,
+  contactTags: [],
+  interactionTopics: [],
+  expertiseAreas: [],
+};
+
+export async function readTags(): Promise<TagDictionary> {
+  try {
+    const [buffer] = await storage.bucket(BUCKET).file('tags.json').download();
+    return JSON.parse(buffer.toString('utf-8')) as TagDictionary;
+  } catch (err: any) {
+    if (err.code === 404) {
+      return { ...EMPTY_TAG_DICTIONARY };
+    }
+    throw err;
+  }
+}
+
+export async function writeTags(tags: TagDictionary): Promise<void> {
+  return writeJson('tags.json', tags);
+}
+
+export async function readSummaries(): Promise<ContactSummary[]> {
+  return readJson<ContactSummary[]>('contact-summaries.json');
+}
+
+export async function writeSummaries(summaries: ContactSummary[]): Promise<void> {
+  return writeJson('contact-summaries.json', summaries);
 }

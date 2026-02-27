@@ -27,6 +27,8 @@ interface ImportedContact {
   phone?: string;
   linkedin?: string;
   nickname?: string;
+  notes?: string[];
+  expertise?: string[];
 }
 
 interface ImportedInteraction {
@@ -35,7 +37,8 @@ interface ImportedInteraction {
   type: InteractionType;
   summary: string;
   topics?: string[];
-  followUp?: string;
+  mentionedNextSteps?: string;
+  location?: string;
 }
 
 interface ImportResult {
@@ -110,6 +113,8 @@ function parseJSON(content: string, sourceFile: string): ImportResult {
         phone: item.phone || item.contactInfo?.phone,
         linkedin: item.linkedin || item.contactInfo?.linkedin,
         nickname: item.nickname,
+        notes: item.notes,
+        expertise: item.expertise,
       });
     }
     if (item.summary && item.contactName) {
@@ -119,7 +124,8 @@ function parseJSON(content: string, sourceFile: string): ImportResult {
         type: item.type || 'other',
         summary: item.summary,
         topics: item.topics,
-        followUp: item.followUp,
+        mentionedNextSteps: item.mentionedNextSteps ?? item.followUp,
+        location: item.location,
       });
     }
   }
@@ -258,6 +264,8 @@ for (const file of files) {
         phone: imported.phone ?? null,
         linkedin: imported.linkedin ?? null,
       },
+      notes: imported.notes ?? [],
+      expertise: imported.expertise ?? [],
       createdAt: now,
       updatedAt: now,
     };
@@ -276,12 +284,13 @@ for (const file of files) {
 
     const interaction: Interaction = {
       id: generateInteractionId(),
-      contactId: matches[0].id,
+      contactIds: [matches[0].id],
       date: imported.date,
       type: imported.type,
       summary: imported.summary,
       topics: imported.topics ?? [],
-      followUp: imported.followUp ?? null,
+      mentionedNextSteps: imported.mentionedNextSteps ?? null,
+      location: imported.location ?? null,
       createdAt: now,
     };
     newInteractions.push(interaction);
@@ -310,7 +319,7 @@ if (newContacts.length > 0) {
 if (newInteractions.length > 0) {
   console.log('\n   New interactions:');
   for (const i of newInteractions) {
-    const contactName = [...existingContacts, ...newContacts].find(c => c.id === i.contactId)?.name ?? 'Unknown';
+    const contactName = [...existingContacts, ...newContacts].find(c => i.contactIds.includes(c.id))?.name ?? 'Unknown';
     console.log(`     + [${i.date}] ${i.type} with ${contactName}: ${i.summary.slice(0, 60)}...`);
   }
 }

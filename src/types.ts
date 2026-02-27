@@ -15,17 +15,51 @@ export interface Contact {
   howWeMet?: string | null;
   tags: string[];
   contactInfo: ContactInfo;
+  notes: string[];
+  expertise: string[];
   createdAt: string;
   updatedAt: string;
 }
 
 export interface Interaction {
   id: string;
-  contactId: string;
+  contactIds: string[];    // Array of participant contact IDs
   date: string;         // YYYY-MM-DD
   type: InteractionType;
   summary: string;
   topics: string[];
-  followUp?: string | null;
+  mentionedNextSteps?: string | null;
+  location?: string | null;
   createdAt: string;
+  updatedAt?: string;
+}
+
+export interface TagEntry {
+  tag: string;
+  description: string;
+  aliases: string[];
+}
+
+export interface TagDictionary {
+  version: number;
+  contactTags: TagEntry[];
+  interactionTopics: TagEntry[];
+  expertiseAreas: TagEntry[];
+}
+
+export interface ContactSummary {
+  id: string;
+  name: string;
+  company: string | null;
+  role: string | null;
+  tags: string[];
+  expertise: string[];
+  interactionCount: number;
+  lastInteraction: string | null;
+  firstInteraction: string | null;
+  topTopics: string[];
+  locations: string[];
+  recentSummary: string;
+  mentionedNextSteps: string[];
+  notes: string[];
 }
