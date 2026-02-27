@@ -8,7 +8,7 @@ const args = parseArgs(process.argv.slice(2));
 
 const name = args['name'];
 if (!name) {
-  console.error('Usage: npx tsx src/addContact.ts --name "Name" [--company "Co"] [--role "Role"] [--how-met "Story"] [--tags tag1,tag2] [--email e] [--phone p] [--linkedin url] [--nickname nick] [--notes "note1,note2"] [--expertise "area1,area2"]');
+  console.error('Usage: npx tsx src/addContact.ts --name "Name" [--company "Co"] [--role "Role"] [--how-met "Story"] [--tags tag1,tag2] [--email e] [--phone p] [--linkedin url] [--nickname nick] [--notes "note1,note2"] [--expertise "area1,area2"] [--private]');
   process.exit(1);
 }
 
@@ -48,6 +48,10 @@ const contact: Contact = {
   createdAt: now,
   updatedAt: now,
 };
+
+if (args['private'] === 'true') {
+  contact.private = true;
+}
 
 contacts.push(contact);
 writeContacts(contacts);

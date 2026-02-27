@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { v4 as uuidv4 } from 'uuid';
-import type { Contact, Interaction, TagDictionary, ContactSummary } from './types.js';
+import type { Contact, Interaction, TagDictionary, ContactSummary, CrmConfig } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '..', 'data');
@@ -11,6 +11,7 @@ const CONTACTS_PATH = join(DATA_DIR, 'contacts.json');
 const INTERACTIONS_PATH = join(DATA_DIR, 'interactions.json');
 const TAGS_PATH = join(DATA_DIR, 'tags.json');
 const SUMMARIES_PATH = join(DATA_DIR, 'contact-summaries.json');
+const CONFIG_PATH = join(DATA_DIR, 'config.json');
 
 // --- Read/Write helpers ---
 
@@ -59,6 +60,18 @@ export function writeSummaries(summaries: ContactSummary[]): void {
   writeFileSync(SUMMARIES_PATH, JSON.stringify(summaries, null, 2) + '\n', 'utf-8');
 }
 
+const DEFAULT_CONFIG: CrmConfig = { privateKey: '' };
+
+export function readConfig(): CrmConfig {
+  if (!existsSync(CONFIG_PATH)) return { ...DEFAULT_CONFIG };
+  const raw = readFileSync(CONFIG_PATH, 'utf-8');
+  return JSON.parse(raw) as CrmConfig;
+}
+
+export function writeConfig(config: CrmConfig): void {
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+}
+
 // --- ID generation ---
 
 export function generateContactId(): string {
@@ -79,8 +92,17 @@ export function rebuildContactSummary(contactId: string): void {
   const contact = contacts.find(c => c.id === contactId);
   if (!contact) return;
 
+  // Remove summary for private contacts
+  if (isContactPrivate(contact)) {
+    const idx = summaries.findIndex(s => s.id === contactId);
+    if (idx >= 0) summaries.splice(idx, 1);
+    writeSummaries(summaries);
+    return;
+  }
+
+  // Only include public interactions in summary
   const contactInteractions = interactions
-    .filter(i => i.contactIds.includes(contactId))
+    .filter(i => i.contactIds.includes(contactId) && !isInteractionPrivate(i, contacts))
     .sort((a, b) => b.date.localeCompare(a.date));
 
   // Top topics by frequency
@@ -141,6 +163,20 @@ export function rebuildContactSummary(contactId: string): void {
   }
 
   writeSummaries(summaries);
+}
+
+// --- Privacy helpers ---
+
+export function isContactPrivate(contact: Contact): boolean {
+  return contact.private === true;
+}
+
+export function isInteractionPrivate(interaction: Interaction, contacts: Contact[]): boolean {
+  if (interaction.private === true) return true;
+  return interaction.contactIds.some(id => {
+    const c = contacts.find(ct => ct.id === id);
+    return c && isContactPrivate(c);
+  });
 }
 
 // --- Search helpers ---

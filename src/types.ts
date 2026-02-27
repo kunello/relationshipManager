@@ -17,6 +17,7 @@ export interface Contact {
   contactInfo: ContactInfo;
   notes: string[];
   expertise: string[];
+  private?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -30,6 +31,7 @@ export interface Interaction {
   topics: string[];
   mentionedNextSteps?: string | null;
   location?: string | null;
+  private?: boolean;
   createdAt: string;
   updatedAt?: string;
 }
@@ -45,6 +47,10 @@ export interface TagDictionary {
   contactTags: TagEntry[];
   interactionTopics: TagEntry[];
   expertiseAreas: TagEntry[];
+}
+
+export interface CrmConfig {
+  privateKey: string;
 }
 
 export interface ContactSummary {

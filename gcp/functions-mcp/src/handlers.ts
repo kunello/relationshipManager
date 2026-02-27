@@ -2,8 +2,9 @@ import { randomBytes } from 'crypto';
 import {
   readContacts, writeContacts, readInteractions, writeInteractions,
   readTags, writeTags, readSummaries, writeSummaries,
+  readConfig, writeConfig,
 } from './gcs-data.js';
-import type { Contact, Interaction, InteractionType, ContactSummary, TagDictionary } from './types.js';
+import type { Contact, Interaction, InteractionType, ContactSummary, TagDictionary, CrmConfig } from './types.js';
 
 function generateId(prefix: string): string {
   return `${prefix}_${randomBytes(6).toString('hex')}`;
@@ -30,9 +31,63 @@ function contactSummary(c: Contact): object {
   };
 }
 
+// ── Privacy helpers ─────────────────────────────────────────────────
+
+async function isUnlocked(privateKey?: string): Promise<boolean> {
+  if (!privateKey) return false;
+  const config = await readConfig();
+  return config.privateKey !== '' && privateKey === config.privateKey;
+}
+
+function isContactPrivate(contact: Contact): boolean {
+  return contact.private === true;
+}
+
+function isInteractionPrivate(interaction: Interaction, contacts: Contact[]): boolean {
+  if (interaction.private === true) return true;
+  return interaction.contactIds.some(id => {
+    const c = contacts.find(ct => ct.id === id);
+    return c && isContactPrivate(c);
+  });
+}
+
+function filterPrivateContacts(contacts: Contact[], unlocked: boolean): Contact[] {
+  return unlocked ? contacts : contacts.filter(c => !isContactPrivate(c));
+}
+
+function filterPrivateInteractions(interactions: Interaction[], contacts: Contact[], unlocked: boolean): Interaction[] {
+  return unlocked ? interactions : interactions.filter(i => !isInteractionPrivate(i, contacts));
+}
+
+/** Redact private participants from an interaction's contactIds/participantNames. */
+function redactInteractionParticipants(
+  interaction: Interaction,
+  contacts: Contact[],
+  contactMap: Map<string, string>,
+  unlocked: boolean,
+): { contactIds: string[]; participantNames: string[]; participantCount: number } {
+  if (unlocked) {
+    return {
+      contactIds: interaction.contactIds,
+      participantNames: interaction.contactIds.map(id => contactMap.get(id) ?? 'Unknown'),
+      participantCount: interaction.contactIds.length,
+    };
+  }
+  const visibleIds = interaction.contactIds.filter(id => {
+    const c = contacts.find(ct => ct.id === id);
+    return !c || !isContactPrivate(c);
+  });
+  return {
+    contactIds: visibleIds,
+    participantNames: visibleIds.map(id => contactMap.get(id) ?? 'Unknown'),
+    participantCount: visibleIds.length,
+  };
+}
+
 // ── Contact summary generation ────────────────────────────────────────
 
-/** Build a ContactSummary from pre-loaded data (pure, no I/O). */
+/** Build a ContactSummary from pre-loaded data (pure, no I/O).
+ *  Excludes private interactions from the summary rollup. */
 function buildSummaryForContact(
   contactId: string,
   contacts: Contact[],
@@ -41,8 +96,12 @@ function buildSummaryForContact(
   const contact = contacts.find(c => c.id === contactId);
   if (!contact) return null;
 
+  // Skip summary for private contacts
+  if (isContactPrivate(contact)) return null;
+
+  // Only include public interactions in summary
   const contactInteractions = interactions
-    .filter(i => i.contactIds.includes(contactId))
+    .filter(i => i.contactIds.includes(contactId) && !isInteractionPrivate(i, contacts))
     .sort((a, b) => b.date.localeCompare(a.date));
 
   // Top topics by frequency
@@ -109,6 +168,15 @@ async function rebuildContactSummaries(contactIds: string[]): Promise<void> {
   ]);
 
   for (const contactId of contactIds) {
+    const contact = contacts.find(c => c.id === contactId);
+
+    // Remove summary for private contacts
+    if (contact && isContactPrivate(contact)) {
+      const idx = summaries.findIndex(s => s.id === contactId);
+      if (idx >= 0) summaries.splice(idx, 1);
+      continue;
+    }
+
     const summary = buildSummaryForContact(contactId, contacts, interactions);
     if (!summary) continue;
 
@@ -130,9 +198,11 @@ export async function searchContacts(args: {
   company?: string;
   expertise?: string;
   limit?: number;
+  privateKey?: string;
 }) {
   const contacts = await readContacts();
-  let results = contacts;
+  const unlocked = await isUnlocked(args.privateKey);
+  let results = filterPrivateContacts(contacts, unlocked);
 
   if (args.query) {
     const q = args.query.toLowerCase();
@@ -173,8 +243,9 @@ export async function searchContacts(args: {
 }
 
 // ── get_contact ──────────────────────────────────────────────────────
-export async function getContact(args: { name?: string; contactId?: string }) {
+export async function getContact(args: { name?: string; contactId?: string; privateKey?: string }) {
   const [contacts, interactions] = await Promise.all([readContacts(), readInteractions()]);
+  const unlocked = await isUnlocked(args.privateKey);
 
   let contact: Contact | undefined;
   if (args.contactId) {
@@ -189,15 +260,26 @@ export async function getContact(args: { name?: string; contactId?: string }) {
     return { error: `Contact not found: ${args.name ?? args.contactId}` };
   }
 
+  // Block access to private contacts without key
+  if (isContactPrivate(contact) && !unlocked) {
+    return { error: `Contact not found: ${args.name ?? args.contactId}` };
+  }
+
   const contactMap = new Map(contacts.map(c => [c.id, c.name]));
-  const contactInteractions = interactions
-    .filter(i => i.contactIds.includes(contact!.id))
+
+  // Filter private interactions
+  const visibleInteractions = filterPrivateInteractions(
+    interactions.filter(i => i.contactIds.includes(contact!.id)),
+    contacts,
+    unlocked,
+  );
+
+  const contactInteractions = visibleInteractions
     .sort((a, b) => b.date.localeCompare(a.date))
-    .map(i => ({
-      ...i,
-      participantNames: i.contactIds.map(id => contactMap.get(id) ?? 'Unknown'),
-      participantCount: i.contactIds.length,
-    }));
+    .map(i => {
+      const redacted = redactInteractionParticipants(i, contacts, contactMap, unlocked);
+      return { ...i, ...redacted };
+    });
 
   return {
     contact,
@@ -220,6 +302,8 @@ export async function addContact(args: {
   notes?: string[];
   expertise?: string[];
   forceDuplicate?: boolean;
+  private?: boolean;
+  privateKey?: string;
 }) {
   // Validate full name (first + last)
   const nameParts = args.name.trim().split(/\s+/);
@@ -265,6 +349,10 @@ export async function addContact(args: {
     updatedAt: now,
   };
 
+  if (args.private) {
+    newContact.private = true;
+  }
+
   contacts.push(newContact);
   await writeContacts(contacts);
   await rebuildContactSummary(newContact.id);
@@ -277,8 +365,10 @@ export async function updateContact(args: {
   name?: string;
   contactId?: string;
   updates: Record<string, unknown>;
+  privateKey?: string;
 }) {
   const contacts = await readContacts();
+  const unlocked = await isUnlocked(args.privateKey);
 
   let contact: Contact | undefined;
   if (args.contactId) {
@@ -293,7 +383,12 @@ export async function updateContact(args: {
     return { error: `Contact not found: ${args.name ?? args.contactId}` };
   }
 
-  const allowedTopLevel = ['name', 'nickname', 'company', 'role', 'howWeMet', 'tags', 'notes', 'expertise'];
+  // Require key to update private contacts
+  if (isContactPrivate(contact) && !unlocked) {
+    return { error: `Contact not found: ${args.name ?? args.contactId}` };
+  }
+
+  const allowedTopLevel = ['name', 'nickname', 'company', 'role', 'howWeMet', 'tags', 'notes', 'expertise', 'private'];
   const allowedContactInfo = ['email', 'phone', 'linkedin'];
 
   for (const [key, value] of Object.entries(args.updates)) {
@@ -324,8 +419,11 @@ export async function logInteraction(args: {
   mentionedNextSteps?: string;
   location?: string;
   forceCreate?: boolean;
+  private?: boolean;
+  privateKey?: string;
 }) {
   const [contacts, interactions] = await Promise.all([readContacts(), readInteractions()]);
+  const unlocked = await isUnlocked(args.privateKey);
 
   // Resolve contact IDs — precedence: contactIds > contactNames > contactId > contactName
   let resolvedContactIds: string[] = [];
@@ -366,6 +464,15 @@ export async function logInteraction(args: {
 
   // Deduplicate
   resolvedContactIds = [...new Set(resolvedContactIds)];
+
+  // Require key if any participant is private
+  const hasPrivateParticipant = resolvedContactIds.some(id => {
+    const c = contacts.find(ct => ct.id === id);
+    return c && isContactPrivate(c);
+  });
+  if (hasPrivateParticipant && !unlocked) {
+    return { error: 'Cannot log interaction with private contact without privateKey' };
+  }
 
   const contactMap = new Map(contacts.map(c => [c.id, c.name]));
   const participantNames = resolvedContactIds.map(id => contactMap.get(id) ?? 'Unknown');
@@ -427,6 +534,10 @@ export async function logInteraction(args: {
     createdAt: now,
   };
 
+  if (args.private) {
+    newInteraction.private = true;
+  }
+
   interactions.push(newInteraction);
   await writeInteractions(interactions);
 
@@ -444,18 +555,25 @@ export async function logInteraction(args: {
 export async function editInteraction(args: {
   interactionId: string;
   updates: Record<string, unknown>;
+  privateKey?: string;
 }) {
-  const interactions = await readInteractions();
+  const [contacts, interactions] = await Promise.all([readContacts(), readInteractions()]);
+  const unlocked = await isUnlocked(args.privateKey);
 
   const interaction = interactions.find(i => i.id === args.interactionId);
   if (!interaction) {
     return { error: `Interaction not found: ${args.interactionId}` };
   }
 
+  // Require key to edit private interactions
+  if (isInteractionPrivate(interaction, contacts) && !unlocked) {
+    return { error: `Interaction not found: ${args.interactionId}` };
+  }
+
   // Track old contactIds for summary rebuild
   const oldContactIds = [...interaction.contactIds];
 
-  const allowedFields = ['summary', 'date', 'type', 'topics', 'mentionedNextSteps', 'location', 'contactIds'];
+  const allowedFields = ['summary', 'date', 'type', 'topics', 'mentionedNextSteps', 'location', 'contactIds', 'private'];
 
   for (const [key, value] of Object.entries(args.updates)) {
     if (allowedFields.includes(key)) {
@@ -480,17 +598,27 @@ export async function getRecentInteractions(args: {
   since?: string;
   type?: string;
   limit?: number;
+  privateKey?: string;
 }) {
   const [contacts, interactions] = await Promise.all([readContacts(), readInteractions()]);
+  const unlocked = await isUnlocked(args.privateKey);
 
-  let results = interactions;
+  let results = filterPrivateInteractions(interactions, contacts, unlocked);
 
   // Filter by contact (find interactions where this person participated)
   if (args.contactId) {
+    // Require key to filter by private contact
+    const contact = contacts.find(c => c.id === args.contactId);
+    if (contact && isContactPrivate(contact) && !unlocked) {
+      return { error: `Contact not found: ${args.contactId}` };
+    }
     results = results.filter(i => i.contactIds.includes(args.contactId!));
   } else if (args.contactName) {
     const contact = findContactByName(args.contactName, contacts);
     if (!contact) return { error: `Contact not found: ${args.contactName}` };
+    if (isContactPrivate(contact) && !unlocked) {
+      return { error: `Contact not found: ${args.contactName}` };
+    }
     results = results.filter(i => i.contactIds.includes(contact.id));
   }
 
@@ -508,13 +636,12 @@ export async function getRecentInteractions(args: {
   const limit = args.limit ?? 20;
   results = results.slice(0, limit);
 
-  // Enrich with participant names
+  // Enrich with participant names (redact private participants)
   const contactMap = new Map(contacts.map(c => [c.id, c.name]));
-  const enriched = results.map(i => ({
-    ...i,
-    participantNames: i.contactIds.map(id => contactMap.get(id) ?? 'Unknown'),
-    participantCount: i.contactIds.length,
-  }));
+  const enriched = results.map(i => {
+    const redacted = redactInteractionParticipants(i, contacts, contactMap, unlocked);
+    return { ...i, ...redacted };
+  });
 
   return {
     count: enriched.length,
@@ -523,24 +650,30 @@ export async function getRecentInteractions(args: {
 }
 
 // ── get_mentioned_next_steps ─────────────────────────────────────────
-export async function getMentionedNextSteps(args: { limit?: number }) {
+export async function getMentionedNextSteps(args: { limit?: number; privateKey?: string }) {
   const [contacts, interactions] = await Promise.all([readContacts(), readInteractions()]);
+  const unlocked = await isUnlocked(args.privateKey);
 
   const contactMap = new Map(contacts.map(c => [c.id, c.name]));
 
-  const withNextSteps = interactions
+  const visibleInteractions = filterPrivateInteractions(interactions, contacts, unlocked);
+
+  const withNextSteps = visibleInteractions
     .filter(i => i.mentionedNextSteps)
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, args.limit ?? 50)
-    .map(i => ({
-      participantNames: i.contactIds.map(id => contactMap.get(id) ?? 'Unknown'),
-      contactIds: i.contactIds,
-      interactionId: i.id,
-      date: i.date,
-      mentionedNextSteps: i.mentionedNextSteps,
-      summary: i.summary,
-      participantCount: i.contactIds.length,
-    }));
+    .map(i => {
+      const redacted = redactInteractionParticipants(i, contacts, contactMap, unlocked);
+      return {
+        participantNames: redacted.participantNames,
+        contactIds: redacted.contactIds,
+        interactionId: i.id,
+        date: i.date,
+        mentionedNextSteps: i.mentionedNextSteps,
+        summary: i.summary,
+        participantCount: redacted.participantCount,
+      };
+    });
 
   return {
     count: withNextSteps.length,
@@ -613,12 +746,60 @@ export async function manageTags(args: {
   return { error: `Unknown operation: ${args.operation}` };
 }
 
+// ── manage_privacy ──────────────────────────────────────────────────
+export async function managePrivacy(args: {
+  operation: 'set_key' | 'status';
+  currentKey?: string;
+  newKey?: string;
+}) {
+  if (args.operation === 'status') {
+    const config = await readConfig();
+    const [contacts, interactions] = await Promise.all([readContacts(), readInteractions()]);
+    const privateContactCount = contacts.filter(c => isContactPrivate(c)).length;
+    const privateInteractionCount = interactions.filter(i => i.private === true).length;
+
+    return {
+      keyIsSet: config.privateKey !== '',
+      privateContactCount,
+      privateInteractionCount,
+    };
+  }
+
+  if (args.operation === 'set_key') {
+    if (!args.newKey) {
+      return { error: 'newKey is required for set_key operation' };
+    }
+
+    const config = await readConfig();
+
+    // If a key already exists, require currentKey to change it
+    if (config.privateKey !== '' && args.currentKey !== config.privateKey) {
+      return { error: 'Incorrect currentKey. Provide the existing key to change it.' };
+    }
+
+    config.privateKey = args.newKey;
+    await writeConfig(config);
+
+    return { success: true, message: 'Privacy key has been set.' };
+  }
+
+  return { error: `Unknown operation: ${args.operation}` };
+}
+
 // ── delete_interaction ────────────────────────────────────────────────
-export async function deleteInteraction(args: { interactionId: string }) {
-  const interactions = await readInteractions();
+export async function deleteInteraction(args: { interactionId: string; privateKey?: string }) {
+  const [contacts, interactions] = await Promise.all([readContacts(), readInteractions()]);
+  const unlocked = await isUnlocked(args.privateKey);
 
   const idx = interactions.findIndex(i => i.id === args.interactionId);
   if (idx === -1) {
+    return { error: `Interaction not found: ${args.interactionId}` };
+  }
+
+  const interaction = interactions[idx];
+
+  // Require key to delete private interactions
+  if (isInteractionPrivate(interaction, contacts) && !unlocked) {
     return { error: `Interaction not found: ${args.interactionId}` };
   }
 
@@ -636,10 +817,12 @@ export async function deleteContact(args: {
   name?: string;
   contactId?: string;
   deleteInteractions?: boolean;
+  privateKey?: string;
 }) {
   const [contacts, interactions, summaries] = await Promise.all([
     readContacts(), readInteractions(), readSummaries(),
   ]);
+  const unlocked = await isUnlocked(args.privateKey);
 
   let contact: Contact | undefined;
   if (args.contactId) {
@@ -651,6 +834,11 @@ export async function deleteContact(args: {
   }
 
   if (!contact) {
+    return { error: `Contact not found: ${args.name ?? args.contactId}` };
+  }
+
+  // Require key to delete private contacts
+  if (isContactPrivate(contact) && !unlocked) {
     return { error: `Contact not found: ${args.name ?? args.contactId}` };
   }
 

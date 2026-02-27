@@ -143,6 +143,7 @@ The canonical schema is defined in `src/types.ts`. Here's a summary:
 | `contactInfo` | object | `{ email, phone, linkedin }` — all optional |
 | `notes` | string[] | Persistent personal facts (e.g., kids' names, preferences) |
 | `expertise` | string[] | Domain knowledge areas (e.g., `["agtech", "M&A"]`) |
+| `private` | boolean \| undefined | If `true`, contact is hidden without `privateKey` |
 | `createdAt` | string | ISO 8601 timestamp |
 | `updatedAt` | string | ISO 8601 timestamp |
 
@@ -158,6 +159,7 @@ The canonical schema is defined in `src/types.ts`. Here's a summary:
 | `topics` | string[] | e.g. `["career", "travel"]` |
 | `mentionedNextSteps` | string \| null | Context for future reference, not task assignments |
 | `location` | string \| null | Where the interaction took place |
+| `private` | boolean \| undefined | If `true`, interaction is hidden without `privateKey` |
 | `createdAt` | string | ISO 8601 timestamp |
 | `updatedAt` | string | Set on edit, ISO 8601 timestamp |
 
@@ -219,6 +221,37 @@ npx tsx scripts/bulkImport.ts --file x.md  # Single file
 ```
 
 These scripts require Node.js and are run from the project root. They are **not needed** when using Claude.ai — just read/write the JSON files directly.
+
+## Privacy Mode
+
+Contacts and interactions can be marked as **private** to hide them from normal MCP tool responses. This protects sensitive relationships and conversations from being surfaced in casual Claude.ai usage.
+
+### Rules
+
+1. **Contact-level privacy**: If a contact has `private: true`, they and ALL their interactions are hidden from search/browse
+2. **Interaction-level privacy**: If a contact is public but an interaction has `private: true`, that interaction alone is hidden
+3. **Group interaction redaction**: If a private contact is in a group interaction, the interaction is still visible to other participants but the private contact is redacted from `participantNames`/`contactIds`
+4. **Summary exclusion**: Private contacts have no summary record. Private interactions are excluded from all summary rollups (interactionCount, topTopics, recentSummary, locations, mentionedNextSteps)
+5. **Unlock mechanism**: Pass `privateKey` in any tool call to unlock private data for that request
+
+### Setting Up
+
+Use the `manage_privacy` MCP tool to set a passphrase:
+- `manage_privacy({ operation: 'set_key', newKey: 'your-passphrase' })` — first-time setup
+- `manage_privacy({ operation: 'set_key', currentKey: 'old', newKey: 'new' })` — change passphrase
+- `manage_privacy({ operation: 'status' })` — check if a key is set and count private records
+
+The passphrase is stored in `config.json` alongside the data (GCS bucket or local `data/` directory). No env vars or redeployment needed.
+
+### Marking Data as Private
+
+- **Adding**: `add_contact({ ..., private: true })` or `log_interaction({ ..., private: true })`
+- **Toggling**: `update_contact({ name: 'X', updates: { private: true } })` or `edit_interaction({ id: 'i_xxx', updates: { private: false } })`
+- **CLI**: `--private` flag on `addContact.ts` and `addInteraction.ts`
+
+### Reading Private Data
+
+Pass `privateKey` to any read tool: `search_contacts({ query: 'X', privateKey: 'your-passphrase' })`. Without the key, private data is invisible (returns "not found" rather than "access denied" to avoid leaking existence).
 
 ## Getting Started
 

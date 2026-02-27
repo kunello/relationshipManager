@@ -23,6 +23,7 @@ import {
   manageTags,
   deleteInteraction,
   deleteContact,
+  managePrivacy,
 } from './handlers.js';
 
 // ── Tool dispatch ────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ const toolHandlers: Record<string, (args: any) => Promise<any>> = {
   manage_tags: manageTags,
   delete_interaction: deleteInteraction,
   delete_contact: deleteContact,
+  manage_privacy: managePrivacy,
 };
 
 // ── Create MCP server instance ───────────────────────────────────────

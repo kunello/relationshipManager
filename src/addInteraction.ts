@@ -16,7 +16,7 @@ const summary = args['summary'];
 if ((!contactQuery && !contactsQuery) || !summary) {
   console.error('Usage: npx tsx src/addInteraction.ts --contact "Name" --summary "What happened" [options]');
   console.error('       npx tsx src/addInteraction.ts --contacts "Name1,Name2,Name3" --summary "What happened" [options]');
-  console.error('Options: [--date YYYY-MM-DD] [--type catch-up] [--topics t1,t2] [--mentioned-next-steps "Do X"] [--follow-up "Do X"] [--location "Place"]');
+  console.error('Options: [--date YYYY-MM-DD] [--type catch-up] [--topics t1,t2] [--mentioned-next-steps "Do X"] [--follow-up "Do X"] [--location "Place"] [--private]');
   process.exit(1);
 }
 
@@ -85,6 +85,10 @@ const interaction: Interaction = {
   location: args['location'] ?? null,
   createdAt: now,
 };
+
+if (args['private'] === 'true') {
+  interaction.private = true;
+}
 
 const interactions = readInteractions();
 interactions.push(interaction);

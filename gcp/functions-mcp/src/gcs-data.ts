@@ -1,5 +1,5 @@
 import { Storage } from '@google-cloud/storage';
-import type { Contact, Interaction, TagDictionary, ContactSummary } from './types.js';
+import type { Contact, Interaction, TagDictionary, ContactSummary, CrmConfig } from './types.js';
 
 const storage = new Storage();
 const BUCKET = process.env.DATA_BUCKET_NAME!;
@@ -68,4 +68,22 @@ export async function readSummaries(): Promise<ContactSummary[]> {
 
 export async function writeSummaries(summaries: ContactSummary[]): Promise<void> {
   return writeJson('contact-summaries.json', summaries);
+}
+
+const DEFAULT_CONFIG: CrmConfig = { privateKey: '' };
+
+export async function readConfig(): Promise<CrmConfig> {
+  try {
+    const [buffer] = await storage.bucket(BUCKET).file('config.json').download();
+    return JSON.parse(buffer.toString('utf-8')) as CrmConfig;
+  } catch (err: any) {
+    if (err.code === 404) {
+      return { ...DEFAULT_CONFIG };
+    }
+    throw err;
+  }
+}
+
+export async function writeConfig(config: CrmConfig): Promise<void> {
+  return writeJson('config.json', config);
 }

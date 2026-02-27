@@ -3,7 +3,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 export const TOOLS: Tool[] = [
   {
     name: 'search_contacts',
-    description: 'Search contacts by name, company, tag, expertise, or freeform text. Also searches notes.',
+    description: 'Search contacts by name, company, tag, expertise, or freeform text. Also searches notes. Private contacts are hidden unless privateKey is provided.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -12,23 +12,25 @@ export const TOOLS: Tool[] = [
         company: { type: 'string', description: 'Filter by company (partial match)' },
         expertise: { type: 'string', description: 'Filter by expertise area (partial match)' },
         limit: { type: 'number', description: 'Max results (default 20)' },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
     },
   },
   {
     name: 'get_contact',
-    description: 'Get full contact details and all their interactions. Look up by name or ID.',
+    description: 'Get full contact details and all their interactions. Look up by name or ID. Private contacts require privateKey. Private interactions are filtered unless unlocked.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         name: { type: 'string', description: 'Contact name (partial match)' },
         contactId: { type: 'string', description: 'Exact contact ID' },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
     },
   },
   {
     name: 'add_contact',
-    description: 'Add a new contact. Requires full name (first + last). Always present the proposed record to the user for confirmation before calling this tool — verify spelling of name, company, and role.',
+    description: 'Add a new contact. Requires full name (first + last). Always present the proposed record to the user for confirmation before calling this tool — verify spelling of name, company, and role. Set private: true to mark as private.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -44,13 +46,15 @@ export const TOOLS: Tool[] = [
         notes: { type: 'array', items: { type: 'string' }, description: 'Persistent personal facts about this person' },
         expertise: { type: 'array', items: { type: 'string' }, description: 'Domain knowledge areas or specialisations' },
         forceDuplicate: { type: 'boolean', description: 'Set true to create a contact even when a matching name already exists (after confirming with the user that it is a different person)' },
+        private: { type: 'boolean', description: 'Mark this contact as private (hidden without privateKey)' },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
       required: ['name'],
     },
   },
   {
     name: 'update_contact',
-    description: 'Update an existing contact. Provide name/ID and an updates object with fields to change.',
+    description: 'Update an existing contact. Provide name/ID and an updates object with fields to change. Private contacts require privateKey. Include "private" in updates to toggle privacy.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -58,15 +62,16 @@ export const TOOLS: Tool[] = [
         contactId: { type: 'string', description: 'Exact contact ID' },
         updates: {
           type: 'object',
-          description: 'Fields to update: name, nickname, company, role, howWeMet, tags, notes, expertise, email, phone, linkedin',
+          description: 'Fields to update: name, nickname, company, role, howWeMet, tags, notes, expertise, email, phone, linkedin, private',
         },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
       required: ['updates'],
     },
   },
   {
     name: 'log_interaction',
-    description: 'Log an interaction with one or more contacts. Supports multi-contact interactions (group dinners, meetings). Present the proposed record to the user for confirmation before writing. Highlight assigned topics.',
+    description: 'Log an interaction with one or more contacts. Supports multi-contact interactions (group dinners, meetings). Present the proposed record to the user for confirmation before writing. Set private: true to mark as private. Requires privateKey if any participant is private.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -81,28 +86,31 @@ export const TOOLS: Tool[] = [
         mentionedNextSteps: { type: 'string', description: 'Context for future reference, not task assignments' },
         location: { type: 'string', description: 'Where the interaction took place' },
         forceCreate: { type: 'boolean', description: 'Set true to create even when a similar interaction exists nearby (after confirming with the user)' },
+        private: { type: 'boolean', description: 'Mark this interaction as private (hidden without privateKey)' },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
       required: ['summary'],
     },
   },
   {
     name: 'edit_interaction',
-    description: 'Edit an existing interaction. Always confirm changes with the user before writing.',
+    description: 'Edit an existing interaction. Always confirm changes with the user before writing. Private interactions require privateKey. Include "private" in updates to toggle privacy.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         interactionId: { type: 'string', description: 'The interaction ID to edit' },
         updates: {
           type: 'object',
-          description: 'Fields to update: summary, date, type, topics, mentionedNextSteps, location',
+          description: 'Fields to update: summary, date, type, topics, mentionedNextSteps, location, private',
         },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
       required: ['interactionId', 'updates'],
     },
   },
   {
     name: 'get_recent_interactions',
-    description: 'Get recent interactions, optionally filtered by contact, date, or type.',
+    description: 'Get recent interactions, optionally filtered by contact, date, or type. Private interactions are hidden unless privateKey is provided. Private participants are redacted from group interactions.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -111,16 +119,18 @@ export const TOOLS: Tool[] = [
         since: { type: 'string', description: 'Only on/after this date (YYYY-MM-DD)' },
         type: { type: 'string', enum: ['catch-up', 'meeting', 'call', 'message', 'event', 'other'] },
         limit: { type: 'number', description: 'Max results (default 20)' },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
     },
   },
   {
     name: 'get_mentioned_next_steps',
-    description: 'Get mentioned next steps from past interactions — context for future reference.',
+    description: 'Get mentioned next steps from past interactions — context for future reference. Private interactions are excluded unless privateKey is provided.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         limit: { type: 'number', description: 'Max results (default 50)' },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
     },
   },
@@ -150,25 +160,40 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'delete_interaction',
-    description: 'Delete an interaction by ID. Always confirm with the user before deleting. This cannot be undone.',
+    description: 'Delete an interaction by ID. Always confirm with the user before deleting. Private interactions require privateKey.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         interactionId: { type: 'string', description: 'The interaction ID to delete' },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
       required: ['interactionId'],
     },
   },
   {
     name: 'delete_contact',
-    description: 'Delete a contact by name or ID. If the contact has interactions, you must set deleteInteractions: true to also remove them. Always confirm with the user before deleting.',
+    description: 'Delete a contact by name or ID. If the contact has interactions, you must set deleteInteractions: true to also remove them. Private contacts require privateKey.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         name: { type: 'string', description: 'Contact name (partial match)' },
         contactId: { type: 'string', description: 'Exact contact ID' },
         deleteInteractions: { type: 'boolean', description: 'Also delete all interactions with this contact' },
+        privateKey: { type: 'string', description: 'Passphrase to unlock private contacts and interactions' },
       },
+    },
+  },
+  {
+    name: 'manage_privacy',
+    description: 'Manage the privacy passphrase. Use "set_key" to set or change the passphrase (requires currentKey if one already exists). Use "status" to check if a key is set and count private records.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        operation: { type: 'string', enum: ['set_key', 'status'], description: 'Operation to perform' },
+        currentKey: { type: 'string', description: 'Current passphrase (required when changing an existing key)' },
+        newKey: { type: 'string', description: 'New passphrase to set (required for set_key)' },
+      },
+      required: ['operation'],
     },
   },
 ];
