@@ -9,7 +9,8 @@
     "search": "tsx src/searchContacts.ts",
     "view": "tsx src/viewContact.ts",
     "import": "tsx scripts/bulkImport.ts",
-    "import:confirm": "tsx scripts/bulkImport.ts --confirm"
+    "import:confirm": "tsx scripts/bulkImport.ts --confirm",
+    "test": "tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "uuid": "^11.1.0"

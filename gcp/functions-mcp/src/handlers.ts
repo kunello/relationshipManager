@@ -31,13 +31,15 @@ function contactSummary(c: Contact): object {
 }
 
 // ── Contact summary generation ────────────────────────────────────────
-async function rebuildContactSummary(contactId: string): Promise<void> {
-  const [contacts, interactions, summaries] = await Promise.all([
-    readContacts(), readInteractions(), readSummaries(),
-  ]);
 
+/** Build a ContactSummary from pre-loaded data (pure, no I/O). */
+function buildSummaryForContact(
+  contactId: string,
+  contacts: Contact[],
+  interactions: Interaction[],
+): ContactSummary | null {
   const contact = contacts.find(c => c.id === contactId);
-  if (!contact) return;
+  if (!contact) return null;
 
   const contactInteractions = interactions
     .filter(i => i.contactIds.includes(contactId))
@@ -73,7 +75,7 @@ async function rebuildContactSummary(contactId: string): Promise<void> {
     .map(i => i.mentionedNextSteps)
     .filter((ns): ns is string => !!ns);
 
-  const summary: ContactSummary = {
+  return {
     id: contact.id,
     name: contact.name,
     company: contact.company ?? null,
@@ -91,13 +93,31 @@ async function rebuildContactSummary(contactId: string): Promise<void> {
     mentionedNextSteps,
     notes: contact.notes,
   };
+}
 
-  // Replace or insert
-  const idx = summaries.findIndex(s => s.id === contactId);
-  if (idx >= 0) {
-    summaries[idx] = summary;
-  } else {
-    summaries.push(summary);
+/** Rebuild summary for a single contact. Safe for single-contact operations. */
+async function rebuildContactSummary(contactId: string): Promise<void> {
+  return rebuildContactSummaries([contactId]);
+}
+
+/** Rebuild summaries for multiple contacts in a single read-write cycle. */
+async function rebuildContactSummaries(contactIds: string[]): Promise<void> {
+  if (contactIds.length === 0) return;
+
+  const [contacts, interactions, summaries] = await Promise.all([
+    readContacts(), readInteractions(), readSummaries(),
+  ]);
+
+  for (const contactId of contactIds) {
+    const summary = buildSummaryForContact(contactId, contacts, interactions);
+    if (!summary) continue;
+
+    const idx = summaries.findIndex(s => s.id === contactId);
+    if (idx >= 0) {
+      summaries[idx] = summary;
+    } else {
+      summaries.push(summary);
+    }
   }
 
   await writeSummaries(summaries);
@@ -410,8 +430,8 @@ export async function logInteraction(args: {
   interactions.push(newInteraction);
   await writeInteractions(interactions);
 
-  // Rebuild summaries for all participants in parallel
-  await Promise.all(resolvedContactIds.map(id => rebuildContactSummary(id)));
+  // Rebuild summaries for all participants in a single read-write cycle
+  await rebuildContactSummaries(resolvedContactIds);
 
   return {
     logged: newInteraction,
@@ -448,7 +468,7 @@ export async function editInteraction(args: {
 
   // Rebuild summaries for union of old + new contactIds
   const allContactIds = [...new Set([...oldContactIds, ...interaction.contactIds])];
-  await Promise.all(allContactIds.map(id => rebuildContactSummary(id)));
+  await rebuildContactSummaries(allContactIds);
 
   return { updated: interaction };
 }
@@ -606,7 +626,7 @@ export async function deleteInteraction(args: { interactionId: string }) {
   await writeInteractions(interactions);
 
   // Rebuild summaries for ALL participants
-  await Promise.all(removed.contactIds.map(id => rebuildContactSummary(id)));
+  await rebuildContactSummaries(removed.contactIds);
 
   return { deleted: removed };
 }
@@ -688,7 +708,7 @@ export async function deleteContact(args: {
 
     // Rebuild summaries for remaining participants of group interactions
     const uniqueAffected = [...new Set(affectedGroupContactIds)];
-    await Promise.all(uniqueAffected.map(id => rebuildContactSummary(id)));
+    await rebuildContactSummaries(uniqueAffected);
   }
 
   // Remove from summaries
