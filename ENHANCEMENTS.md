@@ -729,7 +729,7 @@ Migrated from `contactId: string` to `contactIds: string[]` so a single interact
 
 ### Changes
 
-1. **Schema:** `Interaction.contactId` → `Interaction.contactIds: string[]` across all 3 codebases (local, GCP, Azure)
+1. **Schema:** `Interaction.contactId` → `Interaction.contactIds: string[]` across all codebases (local, GCP)
 2. **Migration script:** `scripts/migrateToMultiContact.ts` transforms existing data (`contactId` → `contactIds: [contactId]`)
 3. **MCP tool schema:** `log_interaction` now accepts `contactNames: string[]` and `contactIds: string[]` for group interactions, with singular `contactName`/`contactId` as backward-compatible shortcuts
 4. **Handler logic:**
@@ -746,5 +746,5 @@ Migrated from `contactId: string` to `contactIds: string[]` so a single interact
 ### Notes
 
 - The migration is backward-compatible: singular `contactName`/`contactId` params still work by wrapping as a single-element array
-- Cloud data (GCS/Azure Blob) must be migrated before deploying new code, since the new code expects `contactIds` arrays
+- Cloud data (GCS) must be migrated before deploying new code, since the new code expects `contactIds` arrays
 - The `forceCreate` escape hatch still works for legitimate duplicate interactions with overlapping participants

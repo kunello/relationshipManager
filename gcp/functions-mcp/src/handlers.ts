@@ -641,15 +641,31 @@ export async function deleteContact(args: {
   const soloInteractions = relatedInteractions.filter(i => i.contactIds.length === 1);
   const groupInteractions = relatedInteractions.filter(i => i.contactIds.length > 1);
 
-  // Remove the contact
-  const cIdx = contacts.findIndex(c => c.id === contact!.id);
-  contacts.splice(cIdx, 1);
-
   // Handle related interactions if requested
   let deletedInteractionCount = 0;
   let updatedGroupInteractionCount = 0;
 
-  if (args.deleteInteractions && relatedInteractions.length > 0) {
+  // If there are related interactions but deleteInteractions wasn't set, return a warning
+  // BEFORE mutating any state — the caller must confirm first.
+  if (!args.deleteInteractions && relatedInteractions.length > 0) {
+    const parts: string[] = [];
+    if (soloInteractions.length > 0) parts.push(`${soloInteractions.length} solo`);
+    if (groupInteractions.length > 0) parts.push(`${groupInteractions.length} group`);
+
+    return {
+      warning: `Contact "${contact.name}" has ${relatedInteractions.length} interaction(s) (${parts.join(', ')}). Solo interactions will be deleted; group interactions will have this contact removed but preserved. Set deleteInteractions: true to proceed.`,
+      contact: contactSummary(contact),
+      interactionCount: relatedInteractions.length,
+      soloInteractionCount: soloInteractions.length,
+      groupInteractionCount: groupInteractions.length,
+    };
+  }
+
+  // Remove the contact
+  const cIdx = contacts.findIndex(c => c.id === contact!.id);
+  contacts.splice(cIdx, 1);
+
+  if (relatedInteractions.length > 0) {
     const contactId = contact.id;
 
     // Delete solo interactions entirely
@@ -673,18 +689,6 @@ export async function deleteContact(args: {
     // Rebuild summaries for remaining participants of group interactions
     const uniqueAffected = [...new Set(affectedGroupContactIds)];
     await Promise.all(uniqueAffected.map(id => rebuildContactSummary(id)));
-  } else if (relatedInteractions.length > 0) {
-    const parts: string[] = [];
-    if (soloInteractions.length > 0) parts.push(`${soloInteractions.length} solo`);
-    if (groupInteractions.length > 0) parts.push(`${groupInteractions.length} group`);
-
-    return {
-      warning: `Contact "${contact.name}" has ${relatedInteractions.length} interaction(s) (${parts.join(', ')}). Solo interactions will be deleted; group interactions will have this contact removed but preserved. Set deleteInteractions: true to proceed.`,
-      contact: contactSummary(contact),
-      interactionCount: relatedInteractions.length,
-      soloInteractionCount: soloInteractions.length,
-      groupInteractionCount: groupInteractions.length,
-    };
   }
 
   // Remove from summaries
