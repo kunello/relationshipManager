@@ -8,12 +8,15 @@ echo "════════════════════════�
 echo "  Personal CRM — Deploy MCP Server"
 echo "═══════════════════════════════════════════"
 
-# Load .env if present
-if [ -f "$PROJECT_ROOT/.env" ]; then
-  echo "Loading .env..."
-  set -a
-  source "$PROJECT_ROOT/.env"
-  set +a
+# ── Secrets via 1Password CLI ──
+# If not already running under `op run`, re-exec with 1Password secret injection.
+# This resolves op:// references in .env.tpl into environment variables at runtime
+# without ever writing plaintext secrets to disk.
+ENV_TPL="$PROJECT_ROOT/.env.tpl"
+if [ -f "$ENV_TPL" ] && [ -z "${OP_INJECTED:-}" ]; then
+  echo "Injecting secrets from 1Password via .env.tpl..."
+  export OP_INJECTED=1
+  exec op run --env-file="$ENV_TPL" -- "$0" "$@"
 fi
 
 # ── Step 1: Validate required env vars ──
@@ -124,5 +127,5 @@ echo "  To register with Claude.ai:"
 echo "  1. Go to Settings → Integrations → Add MCP Server"
 echo "  2. Enter URL: ${SERVICE_URL}/mcp"
 echo "  3. Sign in with ${ALLOWED_EMAIL}"
-echo "  4. Your 7 CRM tools will appear in conversations"
+echo "  4. Your 13 CRM tools will appear in conversations"
 echo "═══════════════════════════════════════════"
