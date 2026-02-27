@@ -16,7 +16,7 @@ ENV_TPL="$PROJECT_ROOT/.env.tpl"
 if [ -f "$ENV_TPL" ] && [ -z "${OP_INJECTED:-}" ]; then
   echo "Injecting secrets from 1Password via .env.tpl..."
   export OP_INJECTED=1
-  exec op run --env-file="$ENV_TPL" -- "$0" "$@"
+  exec op run --account=my.1password.com --env-file="$ENV_TPL" -- "$0" "$@"
 fi
 
 # ── Step 1: Validate required env vars ──
