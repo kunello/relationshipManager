@@ -1,4 +1,5 @@
 import { Storage } from '@google-cloud/storage';
+import { EMPTY_TAG_DICTIONARY, DEFAULT_CONFIG } from './shared/constants.js';
 import type { Contact, Interaction, TagDictionary, ContactSummary, CrmConfig } from './types.js';
 
 const storage = new Storage();
@@ -39,13 +40,6 @@ export async function writeInteractions(interactions: Interaction[]): Promise<vo
   return writeJson('interactions.json', interactions);
 }
 
-const EMPTY_TAG_DICTIONARY: TagDictionary = {
-  version: 1,
-  contactTags: [],
-  interactionTopics: [],
-  expertiseAreas: [],
-};
-
 export async function readTags(): Promise<TagDictionary> {
   try {
     const [buffer] = await storage.bucket(BUCKET).file('tags.json').download();
@@ -69,8 +63,6 @@ export async function readSummaries(): Promise<ContactSummary[]> {
 export async function writeSummaries(summaries: ContactSummary[]): Promise<void> {
   return writeJson('contact-summaries.json', summaries);
 }
-
-const DEFAULT_CONFIG: CrmConfig = { privateKey: '' };
 
 export async function readConfig(): Promise<CrmConfig> {
   try {

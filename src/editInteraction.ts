@@ -2,9 +2,8 @@ import {
   readInteractions, writeInteractions, readContacts, parseArgs,
   rebuildContactSummary, findContactByName,
 } from './utils.js';
+import { VALID_INTERACTION_TYPES } from '../shared/constants.js';
 import type { InteractionType } from './types.js';
-
-const VALID_TYPES: InteractionType[] = ['catch-up', 'meeting', 'call', 'message', 'event', 'other'];
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -39,8 +38,8 @@ if (args['date']) {
 
 if (args['type']) {
   const newType = args['type'] as InteractionType;
-  if (!VALID_TYPES.includes(newType)) {
-    console.error(`❌ Invalid type "${newType}". Must be one of: ${VALID_TYPES.join(', ')}`);
+  if (!VALID_INTERACTION_TYPES.includes(newType)) {
+    console.error(`❌ Invalid type "${newType}". Must be one of: ${VALID_INTERACTION_TYPES.join(', ')}`);
     process.exit(1);
   }
   interaction.type = newType;

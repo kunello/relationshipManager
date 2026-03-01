@@ -1,24 +1,16 @@
-import { randomBytes } from 'crypto';
 import {
   readContacts, writeContacts, readInteractions, writeInteractions,
   readTags, writeTags, readSummaries, writeSummaries,
   readConfig, writeConfig,
 } from './gcs-data.js';
-import type { Contact, Interaction, InteractionType, ContactSummary, TagDictionary, CrmConfig } from './types.js';
+import { generateContactId, generateInteractionId } from './shared/id-generation.js';
+import { isContactPrivate, isInteractionPrivate } from './shared/privacy.js';
+import { findContactByName } from './shared/search.js';
+import { buildContactSummary } from './shared/summary.js';
+import { validateContactName } from './shared/validation.js';
+import type { Contact, Interaction, InteractionType, ContactSummary } from './types.js';
 
-function generateId(prefix: string): string {
-  return `${prefix}_${randomBytes(6).toString('hex')}`;
-}
-
-function findContactByName(name: string, contacts: Contact[]): Contact | null {
-  const q = name.toLowerCase();
-  return contacts.find(c =>
-    c.name.toLowerCase().includes(q) ||
-    (c.nickname && c.nickname.toLowerCase().includes(q))
-  ) ?? null;
-}
-
-function contactSummary(c: Contact): object {
+function contactSummaryView(c: Contact): object {
   return {
     id: c.id,
     name: c.name,
@@ -37,18 +29,6 @@ async function isUnlocked(privateKey?: string): Promise<boolean> {
   if (!privateKey) return false;
   const config = await readConfig();
   return config.privateKey !== '' && privateKey === config.privateKey;
-}
-
-function isContactPrivate(contact: Contact): boolean {
-  return contact.private === true;
-}
-
-function isInteractionPrivate(interaction: Interaction, contacts: Contact[]): boolean {
-  if (interaction.private === true) return true;
-  return interaction.contactIds.some(id => {
-    const c = contacts.find(ct => ct.id === id);
-    return c && isContactPrivate(c);
-  });
 }
 
 function filterPrivateContacts(contacts: Contact[], unlocked: boolean): Contact[] {
@@ -86,74 +66,6 @@ function redactInteractionParticipants(
 
 // ── Contact summary generation ────────────────────────────────────────
 
-/** Build a ContactSummary from pre-loaded data (pure, no I/O).
- *  Excludes private interactions from the summary rollup. */
-function buildSummaryForContact(
-  contactId: string,
-  contacts: Contact[],
-  interactions: Interaction[],
-): ContactSummary | null {
-  const contact = contacts.find(c => c.id === contactId);
-  if (!contact) return null;
-
-  // Skip summary for private contacts
-  if (isContactPrivate(contact)) return null;
-
-  // Only include public interactions in summary
-  const contactInteractions = interactions
-    .filter(i => i.contactIds.includes(contactId) && !isInteractionPrivate(i, contacts))
-    .sort((a, b) => b.date.localeCompare(a.date));
-
-  // Top topics by frequency
-  const topicCounts = new Map<string, number>();
-  for (const i of contactInteractions) {
-    for (const t of i.topics) {
-      topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
-    }
-  }
-  const topTopics = [...topicCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([topic]) => topic);
-
-  // Unique locations
-  const locations = [...new Set(
-    contactInteractions
-      .map(i => i.location)
-      .filter((loc): loc is string => !!loc)
-  )];
-
-  // Recent summary: last 3 interactions compressed
-  const recentSummary = contactInteractions
-    .slice(0, 3)
-    .map(i => `${i.date}: ${i.summary.slice(0, 100)}`)
-    .join('. ');
-
-  // All mentioned next steps
-  const mentionedNextSteps = contactInteractions
-    .map(i => i.mentionedNextSteps)
-    .filter((ns): ns is string => !!ns);
-
-  return {
-    id: contact.id,
-    name: contact.name,
-    company: contact.company ?? null,
-    role: contact.role ?? null,
-    tags: contact.tags,
-    expertise: contact.expertise,
-    interactionCount: contactInteractions.length,
-    lastInteraction: contactInteractions[0]?.date ?? null,
-    firstInteraction: contactInteractions.length > 0
-      ? contactInteractions[contactInteractions.length - 1].date
-      : null,
-    topTopics,
-    locations,
-    recentSummary,
-    mentionedNextSteps,
-    notes: contact.notes,
-  };
-}
-
 /** Rebuild summary for a single contact. Safe for single-contact operations. */
 async function rebuildContactSummary(contactId: string): Promise<void> {
   return rebuildContactSummaries([contactId]);
@@ -177,7 +89,7 @@ async function rebuildContactSummaries(contactIds: string[]): Promise<void> {
       continue;
     }
 
-    const summary = buildSummaryForContact(contactId, contacts, interactions);
+    const summary = buildContactSummary(contactId, contacts, interactions);
     if (!summary) continue;
 
     const idx = summaries.findIndex(s => s.id === contactId);
@@ -238,7 +150,7 @@ export async function searchContacts(args: {
 
   return {
     count: results.length,
-    contacts: results.map(contactSummary),
+    contacts: results.map(contactSummaryView),
   };
 }
 
@@ -251,7 +163,7 @@ export async function getContact(args: { name?: string; contactId?: string; priv
   if (args.contactId) {
     contact = contacts.find(c => c.id === args.contactId);
   } else if (args.name) {
-    contact = findContactByName(args.name, contacts) ?? undefined;
+    contact = findContactByName(args.name, contacts)[0];
   } else {
     return { error: 'Provide either name or contactId' };
   }
@@ -306,32 +218,28 @@ export async function addContact(args: {
   privateKey?: string;
 }) {
   // Validate full name (first + last)
-  const nameParts = args.name.trim().split(/\s+/);
-  if (nameParts.length < 2) {
+  const nameCheck = validateContactName(args.name);
+  if (!nameCheck.valid) {
     return {
-      error: `Contact name must include both first and last name. Got: "${args.name}". Please ask the user for their full name.`,
+      error: `${nameCheck.error}. Please ask the user for their full name.`,
     };
   }
 
   const contacts = await readContacts();
 
   // Duplicate check — find ALL matches
-  const q = args.name.toLowerCase();
-  const matches = contacts.filter(c =>
-    c.name.toLowerCase().includes(q) ||
-    (c.nickname && c.nickname.toLowerCase().includes(q))
-  );
+  const matches = findContactByName(args.name, contacts);
 
   if (matches.length > 0 && !args.forceDuplicate) {
     return {
       warning: `Found ${matches.length} existing contact(s) matching "${args.name}". If this is a different person, call add_contact again with forceDuplicate: true. Consider adding company or role to distinguish them.`,
-      existingContacts: matches.map(contactSummary),
+      existingContacts: matches.map(contactSummaryView),
     };
   }
 
   const now = new Date().toISOString();
   const newContact: Contact = {
-    id: generateId('c'),
+    id: generateContactId(),
     name: args.name,
     nickname: args.nickname ?? null,
     company: args.company ?? null,
@@ -374,7 +282,7 @@ export async function updateContact(args: {
   if (args.contactId) {
     contact = contacts.find(c => c.id === args.contactId);
   } else if (args.name) {
-    contact = findContactByName(args.name, contacts) ?? undefined;
+    contact = findContactByName(args.name, contacts)[0];
   } else {
     return { error: 'Provide either name or contactId' };
   }
@@ -440,7 +348,7 @@ export async function logInteraction(args: {
   } else if (args.contactNames && args.contactNames.length > 0) {
     // Resolve each name
     for (const name of args.contactNames) {
-      const found = findContactByName(name, contacts);
+      const found = findContactByName(name, contacts)[0];
       if (!found) {
         return { error: `Contact not found: ${name}` };
       }
@@ -453,7 +361,7 @@ export async function logInteraction(args: {
     }
     resolvedContactIds = [args.contactId];
   } else if (args.contactName) {
-    const found = findContactByName(args.contactName, contacts);
+    const found = findContactByName(args.contactName, contacts)[0];
     if (!found) {
       return { error: `Contact not found: ${args.contactName}` };
     }
@@ -523,7 +431,7 @@ export async function logInteraction(args: {
 
   const now = new Date().toISOString();
   const newInteraction: Interaction = {
-    id: generateId('i'),
+    id: generateInteractionId(),
     contactIds: resolvedContactIds,
     date: interactionDate,
     type: (args.type as InteractionType) ?? 'catch-up',
@@ -614,7 +522,7 @@ export async function getRecentInteractions(args: {
     }
     results = results.filter(i => i.contactIds.includes(args.contactId!));
   } else if (args.contactName) {
-    const contact = findContactByName(args.contactName, contacts);
+    const contact = findContactByName(args.contactName, contacts)[0];
     if (!contact) return { error: `Contact not found: ${args.contactName}` };
     if (isContactPrivate(contact) && !unlocked) {
       return { error: `Contact not found: ${args.contactName}` };
@@ -828,7 +736,7 @@ export async function deleteContact(args: {
   if (args.contactId) {
     contact = contacts.find(c => c.id === args.contactId);
   } else if (args.name) {
-    contact = findContactByName(args.name, contacts) ?? undefined;
+    contact = findContactByName(args.name, contacts)[0];
   } else {
     return { error: 'Provide either name or contactId' };
   }
@@ -862,7 +770,7 @@ export async function deleteContact(args: {
 
     return {
       warning: `Contact "${contact.name}" has ${relatedInteractions.length} interaction(s) (${parts.join(', ')}). Solo interactions will be deleted; group interactions will have this contact removed but preserved. Set deleteInteractions: true to proceed.`,
-      contact: contactSummary(contact),
+      contact: contactSummaryView(contact),
       interactionCount: relatedInteractions.length,
       soloInteractionCount: soloInteractions.length,
       groupInteractionCount: groupInteractions.length,
@@ -906,7 +814,7 @@ export async function deleteContact(args: {
   await Promise.all([writeContacts(contacts), writeSummaries(summaries)]);
 
   return {
-    deleted: contactSummary(contact),
+    deleted: contactSummaryView(contact),
     deletedInteractionCount,
     updatedGroupInteractionCount,
   };

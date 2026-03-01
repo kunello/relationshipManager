@@ -8,6 +8,11 @@ echo "════════════════════════�
 echo "  Personal CRM — Deploy MCP Server"
 echo "═══════════════════════════════════════════"
 
+# ── Step 0: Copy shared modules into MCP source tree ──
+echo ""
+echo "Preparing shared modules..."
+"$SCRIPT_DIR/prepare-mcp-deploy.sh"
+
 # ── Secrets via 1Password CLI ──
 # If not already running under `op run`, re-exec with 1Password secret injection.
 # This resolves op:// references in .env.tpl into environment variables at runtime

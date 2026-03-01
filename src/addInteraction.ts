@@ -3,9 +3,8 @@ import {
   generateInteractionId, findContactByName, parseArgs,
   rebuildContactSummary,
 } from './utils.js';
+import { VALID_INTERACTION_TYPES } from '../shared/constants.js';
 import type { Interaction, InteractionType } from './types.js';
-
-const VALID_TYPES: InteractionType[] = ['catch-up', 'meeting', 'call', 'message', 'event', 'other'];
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -66,8 +65,8 @@ const contactNames = resolvedContacts
   .map(c => c.name);
 
 const interactionType = (args['type'] ?? 'other') as InteractionType;
-if (!VALID_TYPES.includes(interactionType)) {
-  console.error(`❌ Invalid type "${interactionType}". Must be one of: ${VALID_TYPES.join(', ')}`);
+if (!VALID_INTERACTION_TYPES.includes(interactionType)) {
+  console.error(`❌ Invalid type "${interactionType}". Must be one of: ${VALID_INTERACTION_TYPES.join(', ')}`);
   process.exit(1);
 }
 
