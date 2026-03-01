@@ -2,6 +2,7 @@ import {
   readContacts, writeContacts, generateContactId, findContactByName, parseArgs,
   rebuildContactSummary,
 } from './utils.js';
+import { validateContactName } from '../shared/validation.js';
 import type { Contact } from './types.js';
 
 const args = parseArgs(process.argv.slice(2));
@@ -13,9 +14,9 @@ if (!name) {
 }
 
 // Validate full name (first + last)
-const nameParts = name.trim().split(/\s+/);
-if (nameParts.length < 2) {
-  console.error(`❌ Contact name must include both first and last name. Got: "${name}"`);
+const nameCheck = validateContactName(name);
+if (!nameCheck.valid) {
+  console.error(`❌ ${nameCheck.error}`);
   process.exit(1);
 }
 
