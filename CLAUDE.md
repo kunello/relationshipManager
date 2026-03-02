@@ -178,6 +178,22 @@ Generate IDs as: prefix + 12 random lowercase hexadecimal characters.
 - Always preserve existing data — append to arrays, never overwrite the file with partial data
 - Interactions may be amended; always confirm edits with the user before writing
 
+## Schema Migration (Important for Self-Hosted Users)
+
+Users who deploy this MCP server to their own GCP projects may have **older data in GCS** that doesn't match the current schema. When changing the schema for contacts or interactions:
+
+1. **Add a normalizer in `gcp/functions-mcp/src/gcs-data.ts`** — normalize legacy fields at the read boundary (in `readContacts()` or `readInteractions()`) so all downstream code sees the current schema. This is preferred over adding null guards across 60+ access sites.
+2. **Keep the local migration script in sync** — if a `scripts/migrate*.ts` exists for the same change, ensure both handle the same cases.
+3. **Never assume clean data** — GCS data may be months behind the current schema. The read-time normalizer is the safety net.
+
+### Past Migrations
+
+| Field Change | Normalizer | Notes |
+|---|---|---|
+| `contactId` (string) → `contactIds` (string[]) | `normalizeInteraction()` in `gcs-data.ts` | Wraps legacy singular field into array; defaults to `[]` if both missing |
+
+When adding future schema changes, add a row to this table and a corresponding normalizer function.
+
 ## CLI Scripts (Optional — for local Claude Code use)
 
 If running locally with Claude Code CLI, these TypeScript scripts are available:
