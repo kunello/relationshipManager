@@ -2,15 +2,13 @@ node_modules/
 dist/
 .DS_Store
 
-# Copied shared modules (build output for MCP deploy)
-gcp/functions-mcp/src/shared/
-
 # Raw import files (personal data)
 import/*
 !import/.gitkeep
 
 # Environment secrets
 .env
+.env.tpl
 .firebase-service-account.json
 
 # Data files

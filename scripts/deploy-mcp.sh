@@ -13,15 +13,31 @@ echo ""
 echo "Preparing shared modules..."
 "$SCRIPT_DIR/prepare-mcp-deploy.sh"
 
-# ── Secrets via 1Password CLI ──
-# If not already running under `op run`, re-exec with 1Password secret injection.
-# This resolves op:// references in .env.tpl into environment variables at runtime
-# without ever writing plaintext secrets to disk.
+# ── Load secrets ──
+# Supports three methods (checked in order):
+#   1. Environment variables already set (CI/CD, manual export)
+#   2. 1Password CLI — if .env.tpl exists and `op` is installed
+#   3. Plain .env file — cp .env.example .env and fill in values
 ENV_TPL="$PROJECT_ROOT/.env.tpl"
-if [ -f "$ENV_TPL" ] && [ -z "${OP_INJECTED:-}" ]; then
-  echo "Injecting secrets from 1Password via .env.tpl..."
-  export OP_INJECTED=1
-  exec op run --account=my.1password.com --env-file="$ENV_TPL" -- "$0" "$@"
+ENV_FILE="$PROJECT_ROOT/.env"
+
+if [ -z "${GOOGLE_CLIENT_SECRET:-}" ]; then
+  if [ -f "$ENV_TPL" ] && command -v op &> /dev/null && [ -z "${OP_INJECTED:-}" ]; then
+    echo "Injecting secrets from 1Password via .env.tpl..."
+    export OP_INJECTED=1
+    exec op run --env-file="$ENV_TPL" -- "$0" "$@"
+  elif [ -f "$ENV_FILE" ]; then
+    echo "Loading secrets from .env..."
+    set -a
+    source "$ENV_FILE"
+    set +a
+  else
+    echo "ERROR: No secrets found. Choose one of:"
+    echo "  1. Export env vars before running this script"
+    echo "  2. Create .env.tpl with op:// references (requires 1Password CLI)"
+    echo "  3. Copy .env.example to .env and fill in values"
+    exit 1
+  fi
 fi
 
 # ── Step 1: Validate required env vars ──
