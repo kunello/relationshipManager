@@ -102,7 +102,7 @@ This is the critical test — if the race condition fix failed, one of Alice or 
 
 ## Report
 
-After all tests, print a summary table:
+After all tests, print a summary table. For the ones that fail, include the raw JSON response in the description:
 
 | Test | Description | Result |
 |------|-------------|--------|
