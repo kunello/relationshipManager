@@ -79,3 +79,19 @@ export async function readConfig(): Promise<CrmConfig> {
 export async function writeConfig(config: CrmConfig): Promise<void> {
   return writeJson('config.json', config);
 }
+
+export async function readOAuthClients(): Promise<Record<string, any>> {
+  try {
+    const [buffer] = await storage.bucket(BUCKET).file('oauth-clients.json').download();
+    return JSON.parse(buffer.toString('utf-8')) as Record<string, any>;
+  } catch (err: any) {
+    if (err.code === 404) {
+      return {};
+    }
+    throw err;
+  }
+}
+
+export async function writeOAuthClients(clients: Record<string, any>): Promise<void> {
+  return writeJson('oauth-clients.json', clients);
+}

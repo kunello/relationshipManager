@@ -1,15 +1,15 @@
 import { ProxyOAuthServerProvider } from '@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js';
 import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import { readOAuthClients, writeOAuthClients } from './gcs-data.js';
 
 const ALLOWED_EMAIL = process.env.ALLOWED_EMAIL!;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
 
-// In-memory client store for MCP dynamic client registration.
-// Claude.ai registers itself as an OAuth client via RFC 7591.
-// We store the registration and map it to our Google OAuth client ID
-// when proxying to Google's endpoints.
+// Write-through cache for MCP dynamic client registrations.
+// In-memory Map serves as a hot cache; GCS (oauth-clients.json) is the durable store.
+// On cold start the Map is empty — getClient falls through to GCS and backfills.
 const registeredClients = new Map<string, OAuthClientInformationFull>();
 
 export const oauthProvider = new ProxyOAuthServerProvider({
@@ -54,8 +54,22 @@ export const oauthProvider = new ProxyOAuthServerProvider({
   },
 
   getClient: async (clientId: string): Promise<OAuthClientInformationFull | undefined> => {
-    // Return registered client if we have it, mapping to our Google client credentials
-    const registered = registeredClients.get(clientId);
+    // Check in-memory cache first
+    let registered = registeredClients.get(clientId);
+
+    // Cache miss — try loading from GCS (handles cold starts / redeployments)
+    if (!registered) {
+      try {
+        const persisted = await readOAuthClients();
+        if (persisted[clientId]) {
+          registered = persisted[clientId] as OAuthClientInformationFull;
+          registeredClients.set(clientId, registered); // backfill cache
+        }
+      } catch (err) {
+        console.error('Failed to read OAuth clients from GCS:', err);
+      }
+    }
+
     if (registered) {
       return {
         ...registered,
@@ -114,7 +128,18 @@ const originalClientsStore = oauthProvider.clientsStore;
       client_secret: GOOGLE_CLIENT_SECRET,
       client_id_issued_at: Math.floor(Date.now() / 1000),
     };
+
+    // Write-through: update in-memory cache and persist to GCS
     registeredClients.set(clientId, registered);
+    try {
+      const persisted = await readOAuthClients();
+      persisted[clientId] = registered;
+      await writeOAuthClients(persisted);
+    } catch (err) {
+      console.error('Failed to persist OAuth client to GCS:', err);
+      // Registration still succeeds in-memory for this instance's lifetime
+    }
+
     return registered;
   },
 };
