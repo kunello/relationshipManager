@@ -33,7 +33,17 @@ export async function writeContacts(contacts: Contact[]): Promise<void> {
 }
 
 export async function readInteractions(): Promise<Interaction[]> {
-  return readJson<Interaction[]>('interactions.json');
+  const raw = await readJson<any[]>('interactions.json');
+  return raw.map(normalizeInteraction);
+}
+
+function normalizeInteraction(i: any): Interaction {
+  // Migrate legacy contactId (string) → contactIds (array)
+  if (!Array.isArray(i.contactIds)) {
+    i.contactIds = i.contactId ? [i.contactId] : [];
+    delete i.contactId;
+  }
+  return i as Interaction;
 }
 
 export async function writeInteractions(interactions: Interaction[]): Promise<void> {
