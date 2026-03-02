@@ -25,7 +25,8 @@ if [ -z "${GOOGLE_CLIENT_SECRET:-}" ]; then
   if [ -f "$ENV_TPL" ] && command -v op &> /dev/null && [ -z "${OP_INJECTED:-}" ]; then
     echo "Injecting secrets from 1Password via .env.tpl..."
     export OP_INJECTED=1
-    exec op run --env-file="$ENV_TPL" -- "$0" "$@"
+    OP_ACCT="${OP_ACCOUNT:-}"
+    exec op run ${OP_ACCT:+--account="$OP_ACCT"} --env-file="$ENV_TPL" -- "$0" "$@"
   elif [ -f "$ENV_FILE" ]; then
     echo "Loading secrets from .env..."
     set -a
